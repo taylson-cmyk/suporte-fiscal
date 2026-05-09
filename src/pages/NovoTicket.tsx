@@ -1,10 +1,10 @@
-import { useState, type FormEvent, type ChangeEvent } from 'react'
+import { useState, type FormEvent, type ChangeEvent, type ClipboardEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { mockDb } from '../lib/mockDb'
 import { useAuth } from '../contexts/AuthContext'
 import AppLayout from '../components/layout/AppLayout'
 import toast from 'react-hot-toast'
-import { Upload, X } from 'lucide-react'
+import { Upload, X, ClipboardPaste } from 'lucide-react'
 
 interface AttachmentPreview {
   file: File
@@ -23,16 +23,38 @@ export default function NovoTicket() {
   const [observacoes, setObservacoes] = useState('')
   const [attachments, setAttachments] = useState<AttachmentPreview[]>([])
 
-  function handleFileChange(e: ChangeEvent<HTMLInputElement>) {
-    const files = Array.from(e.target.files || [])
+  function addImageFiles(files: File[]) {
     const imageFiles = files.filter(f => f.type.startsWith('image/'))
-    const previews = imageFiles.map(file => ({
+    if (imageFiles.length === 0) return false
+    const previews = imageFiles.map((file, i) => ({
       file,
       preview: URL.createObjectURL(file),
-      name: file.name,
+      name: file.name || `print-${Date.now()}-${i}.png`,
     }))
     setAttachments(prev => [...prev, ...previews])
+    return true
+  }
+
+  function handleFileChange(e: ChangeEvent<HTMLInputElement>) {
+    addImageFiles(Array.from(e.target.files || []))
     e.target.value = ''
+  }
+
+  function handlePaste(e: ClipboardEvent<HTMLTextAreaElement>) {
+    const items = Array.from(e.clipboardData.items)
+    const imageItems = items.filter(item => item.type.startsWith('image/'))
+    if (imageItems.length === 0) return
+
+    const files = imageItems
+      .map(item => item.getAsFile())
+      .filter((f): f is File => f !== null)
+      .map((f, i) => new File([f], `print-colado-${Date.now()}-${i}.png`, { type: f.type }))
+
+    const added = addImageFiles(files)
+    if (added) {
+      e.preventDefault()
+      toast.success(`${files.length} imagem${files.length > 1 ? 's' : ''} colada${files.length > 1 ? 's' : ''}!`)
+    }
   }
 
   function removeAttachment(index: number) {
@@ -125,23 +147,35 @@ export default function NovoTicket() {
             </div>
 
             <div>
-              <label className="label">Descrição *</label>
+              <div className="flex items-center justify-between mb-1">
+                <label className="label mb-0">Descrição *</label>
+                <span className="text-xs text-gray-400 flex items-center gap-1">
+                  <ClipboardPaste className="w-3 h-3" /> Cole imagens com Ctrl+V
+                </span>
+              </div>
               <textarea
                 className="input min-h-[120px] resize-y"
-                placeholder="Descreva detalhadamente o problema ou solicitação..."
+                placeholder="Descreva detalhadamente o problema... você também pode colar prints aqui com Ctrl+V"
                 value={descricao}
                 onChange={e => setDescricao(e.target.value)}
+                onPaste={handlePaste}
                 required
               />
             </div>
 
             <div>
-              <label className="label">Observações</label>
+              <div className="flex items-center justify-between mb-1">
+                <label className="label mb-0">Observações</label>
+                <span className="text-xs text-gray-400 flex items-center gap-1">
+                  <ClipboardPaste className="w-3 h-3" /> Cole imagens com Ctrl+V
+                </span>
+              </div>
               <textarea
                 className="input min-h-[80px] resize-y"
-                placeholder="Informações adicionais, referências, etc..."
+                placeholder="Informações adicionais, referências... você também pode colar prints aqui com Ctrl+V"
                 value={observacoes}
                 onChange={e => setObservacoes(e.target.value)}
+                onPaste={handlePaste}
               />
             </div>
 
@@ -149,7 +183,12 @@ export default function NovoTicket() {
               <label className="label">Anexos (imagens)</label>
               <label className="flex items-center gap-2 cursor-pointer border-2 border-dashed border-gray-300 rounded-lg p-4 hover:border-primary-700 hover:bg-primary-50 transition-colors">
                 <Upload className="w-5 h-5 text-gray-400" />
-                <span className="text-sm text-gray-500">Clique para adicionar prints ou imagens</span>
+                <div>
+                  <span className="text-sm text-gray-600 font-medium">Clique para selecionar</span>
+                  <span className="text-sm text-gray-400"> ou cole um print com </span>
+                  <span className="text-sm font-mono font-bold text-gray-500">Ctrl+V</span>
+                  <span className="text-sm text-gray-400"> nos campos acima</span>
+                </div>
                 <input
                   type="file"
                   accept="image/*"
@@ -160,24 +199,27 @@ export default function NovoTicket() {
               </label>
 
               {attachments.length > 0 && (
-                <div className="grid grid-cols-4 gap-2 mt-3">
-                  {attachments.map((att, i) => (
-                    <div key={i} className="relative group">
-                      <img
-                        src={att.preview}
-                        alt={att.name}
-                        className="w-full h-20 object-cover rounded-lg border border-gray-200"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => removeAttachment(i)}
-                        className="absolute top-1 right-1 bg-red-500 text-white rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity"
-                      >
-                        <X className="w-3 h-3" />
-                      </button>
-                      <p className="text-xs text-gray-500 truncate mt-1">{att.name}</p>
-                    </div>
-                  ))}
+                <div className="mt-3">
+                  <p className="text-xs text-gray-500 mb-2">{attachments.length} imagem{attachments.length > 1 ? 's' : ''} anexada{attachments.length > 1 ? 's' : ''}</p>
+                  <div className="grid grid-cols-4 gap-2">
+                    {attachments.map((att, i) => (
+                      <div key={i} className="relative group">
+                        <img
+                          src={att.preview}
+                          alt={att.name}
+                          className="w-full h-20 object-cover rounded-lg border border-gray-200"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => removeAttachment(i)}
+                          className="absolute top-1 right-1 bg-red-500 text-white rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity"
+                        >
+                          <X className="w-3 h-3" />
+                        </button>
+                        <p className="text-xs text-gray-500 truncate mt-1">{att.name}</p>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               )}
             </div>
