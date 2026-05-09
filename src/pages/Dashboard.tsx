@@ -21,25 +21,28 @@ export default function Dashboard() {
   const [filterPrioridade, setFilterPrioridade] = useState('')
   const [filterDias, setFilterDias] = useState('30')
 
-  const { tickets, loading } = useTickets({
+  // Busca todos os tickets sem filtro de status para os cartões de resumo
+  const { tickets: allTickets, loading } = useTickets({
     categoria: filterCategoria as any,
     prioridade: filterPrioridade as any,
   })
 
+  // Cartões sempre mostram todos os tickets (sem filtro de período)
+  const stats = useMemo(() => ({
+    nao_iniciado: allTickets.filter(t => t.status === 'nao_iniciado').length,
+    em_andamento: allTickets.filter(t => t.status === 'em_andamento').length,
+    concluido: allTickets.filter(t => t.status === 'concluido').length,
+    impedido: allTickets.filter(t => t.status === 'impedido').length,
+  }), [allTickets])
+
+  // Lista/Kanban filtram pelo período selecionado
   const filteredTickets = useMemo(() => {
     const cutoff = subDays(new Date(), parseInt(filterDias))
-    return tickets.filter(t => isAfter(new Date(t.criado_em), cutoff))
-  }, [tickets, filterDias])
-
-  const stats = useMemo(() => ({
-    nao_iniciado: filteredTickets.filter(t => t.status === 'nao_iniciado').length,
-    em_andamento: filteredTickets.filter(t => t.status === 'em_andamento').length,
-    concluido: filteredTickets.filter(t => t.status === 'concluido').length,
-    impedido: filteredTickets.filter(t => t.status === 'impedido').length,
-  }), [filteredTickets])
+    return allTickets.filter(t => isAfter(new Date(t.criado_em), cutoff))
+  }, [allTickets, filterDias])
 
   const chartData = useMemo(() => {
-    const days = parseInt(filterDias)
+    const days = Math.min(parseInt(filterDias), 30) // limita a 30 barras para legibilidade
     const buckets: Record<string, number> = {}
     for (let i = days - 1; i >= 0; i--) {
       const d = format(subDays(new Date(), i), 'dd/MM', { locale: ptBR })
@@ -53,7 +56,7 @@ export default function Dashboard() {
   }, [filteredTickets, filterDias])
 
   const statCards = [
-    { label: 'Não iniciado', value: stats.nao_iniciado, icon: Pause, color: 'text-gray-500', bg: 'bg-gray-50', border: 'border-gray-200' },
+    { label: 'Não iniciado', value: stats.nao_iniciado, icon: Pause, color: 'text-gray-600', bg: 'bg-gray-100', border: 'border-gray-200' },
     { label: 'Em andamento', value: stats.em_andamento, icon: Clock, color: 'text-blue-600', bg: 'bg-blue-50', border: 'border-blue-200' },
     { label: 'Concluído', value: stats.concluido, icon: CheckCircle, color: 'text-green-600', bg: 'bg-green-50', border: 'border-green-200' },
     { label: 'Impedido', value: stats.impedido, icon: AlertCircle, color: 'text-red-600', bg: 'bg-red-50', border: 'border-red-200' },
@@ -77,7 +80,7 @@ export default function Dashboard() {
         </Link>
       }
     >
-      {/* Stats cards */}
+      {/* Stats cards — mostram totais globais */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
         {statCards.map(card => (
           <div key={card.label} className={`card p-4 border ${card.border}`}>
@@ -94,31 +97,19 @@ export default function Dashboard() {
 
       {/* Filters */}
       <div className="card p-4 mb-6 flex flex-wrap gap-3 items-center">
-        <select
-          className="input w-auto"
-          value={filterDias}
-          onChange={e => setFilterDias(e.target.value)}
-        >
+        <select className="input w-auto" value={filterDias} onChange={e => setFilterDias(e.target.value)}>
           <option value="7">Últimos 7 dias</option>
           <option value="15">Últimos 15 dias</option>
           <option value="30">Últimos 30 dias</option>
           <option value="90">Últimos 90 dias</option>
         </select>
-        <select
-          className="input w-auto"
-          value={filterCategoria}
-          onChange={e => setFilterCategoria(e.target.value)}
-        >
+        <select className="input w-auto" value={filterCategoria} onChange={e => setFilterCategoria(e.target.value)}>
           <option value="">Todas as categorias</option>
           <option value="tributacao">Tributação</option>
           <option value="revenda">Revenda</option>
           <option value="consumo">Consumo</option>
         </select>
-        <select
-          className="input w-auto"
-          value={filterPrioridade}
-          onChange={e => setFilterPrioridade(e.target.value)}
-        >
+        <select className="input w-auto" value={filterPrioridade} onChange={e => setFilterPrioridade(e.target.value)}>
           <option value="">Todas as prioridades</option>
           <option value="urgente">🔴 Urgente</option>
           <option value="normal">🟢 Normal</option>
@@ -142,17 +133,21 @@ export default function Dashboard() {
       {/* Chart */}
       {isEscritorio && (
         <div className="card p-4 mb-6">
-          <h3 className="text-sm font-semibold text-gray-700 mb-4">Tickets por dia</h3>
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-sm font-semibold text-gray-700">Tickets abertos por dia</h3>
+            <span className="text-xs text-gray-400">{filteredTickets.length} ticket{filteredTickets.length !== 1 ? 's' : ''} no período</span>
+          </div>
           <ResponsiveContainer width="100%" height={200}>
-            <BarChart data={chartData}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-              <XAxis dataKey="date" tick={{ fontSize: 11 }} tickLine={false} axisLine={false} />
+            <BarChart data={chartData} margin={{ top: 0, right: 0, left: -20, bottom: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" vertical={false} />
+              <XAxis dataKey="date" tick={{ fontSize: 10 }} tickLine={false} axisLine={false} interval="preserveStartEnd" />
               <YAxis allowDecimals={false} tick={{ fontSize: 11 }} tickLine={false} axisLine={false} />
               <Tooltip
-                contentStyle={{ fontSize: 12, borderRadius: 8, border: '1px solid #e5e7eb' }}
+                contentStyle={{ fontSize: 12, borderRadius: 8, border: '1px solid #e5e7eb', boxShadow: '0 2px 8px rgba(0,0,0,0.08)' }}
                 labelStyle={{ fontWeight: 600 }}
+                cursor={{ fill: 'rgba(26,58,110,0.04)' }}
               />
-              <Bar dataKey="count" fill="#1a3a6e" radius={[4, 4, 0, 0]} name="Tickets" />
+              <Bar dataKey="count" fill="#1a3a6e" radius={[4, 4, 0, 0]} name="Tickets" maxBarSize={40} />
             </BarChart>
           </ResponsiveContainer>
         </div>
@@ -160,7 +155,10 @@ export default function Dashboard() {
 
       {/* Ticket list / kanban */}
       {loading ? (
-        <div className="card p-12 text-center text-gray-500">Carregando tickets...</div>
+        <div className="card p-12 text-center">
+          <div className="w-6 h-6 border-2 border-primary-900 border-t-transparent rounded-full animate-spin mx-auto mb-2" />
+          <p className="text-gray-500 text-sm">Carregando tickets...</p>
+        </div>
       ) : view === 'table' ? (
         <TicketTable tickets={filteredTickets} isEscritorio={isEscritorio} />
       ) : (
@@ -176,7 +174,7 @@ export default function Dashboard() {
               <div className="space-y-2">
                 {filteredTickets.filter(t => t.status === col.status).map(ticket => (
                   <Link key={ticket.id} to={`/tickets/${ticket.id}`}>
-                    <div className="bg-white rounded-lg border border-gray-200 p-3 hover:shadow-md transition-shadow cursor-pointer">
+                    <div className="bg-white rounded-lg border border-gray-200 p-3 hover:shadow-md transition-shadow cursor-pointer mb-2">
                       <div className="flex items-start justify-between gap-2 mb-2">
                         <span className="ticket-number">#{String(ticket.numero).padStart(4, '0')}</span>
                         <PriorityBadge priority={ticket.prioridade} />
@@ -206,9 +204,9 @@ function TicketTable({ tickets, isEscritorio }: { tickets: Ticket[]; isEscritori
   if (tickets.length === 0) {
     return (
       <div className="card p-12 text-center">
-        <p className="text-gray-500">Nenhum ticket encontrado para o período selecionado.</p>
-        <Link to="/tickets/novo" className="btn-primary mt-4 inline-flex">
-          <PlusCircle className="w-4 h-4" /> Criar primeiro ticket
+        <p className="text-gray-500 mb-4">Nenhum ticket no período selecionado.</p>
+        <Link to="/tickets/novo" className="btn-primary inline-flex">
+          <PlusCircle className="w-4 h-4" /> Criar ticket
         </Link>
       </div>
     )
@@ -243,15 +241,9 @@ function TicketTable({ tickets, isEscritorio }: { tickets: Ticket[]; isEscritori
                 {isEscritorio && (
                   <td className="px-4 py-3 text-gray-600">{ticket.criador?.nome || '—'}</td>
                 )}
-                <td className="px-4 py-3">
-                  <CategoryBadge category={ticket.categoria} />
-                </td>
-                <td className="px-4 py-3">
-                  <PriorityBadge priority={ticket.prioridade} />
-                </td>
-                <td className="px-4 py-3">
-                  <StatusBadge status={ticket.status} />
-                </td>
+                <td className="px-4 py-3"><CategoryBadge category={ticket.categoria} /></td>
+                <td className="px-4 py-3"><PriorityBadge priority={ticket.prioridade} /></td>
+                <td className="px-4 py-3"><StatusBadge status={ticket.status} /></td>
                 <td className="px-4 py-3 text-gray-500">
                   <Timer startDate={ticket.criado_em} endDate={ticket.concluido_em} />
                 </td>
@@ -259,10 +251,7 @@ function TicketTable({ tickets, isEscritorio }: { tickets: Ticket[]; isEscritori
                   <td className="px-4 py-3 text-gray-600">{ticket.responsavel_user?.nome || '—'}</td>
                 )}
                 <td className="px-4 py-3">
-                  <Link
-                    to={`/tickets/${ticket.id}`}
-                    className="text-primary-900 hover:underline text-xs font-medium"
-                  >
+                  <Link to={`/tickets/${ticket.id}`} className="text-primary-900 hover:underline text-xs font-medium">
                     Ver detalhes
                   </Link>
                 </td>

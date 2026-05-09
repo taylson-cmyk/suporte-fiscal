@@ -8,7 +8,7 @@ import { format } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
 
 export default function Perfil() {
-  const { user } = useAuth()
+  const { user, refreshUser } = useAuth()
   const [nome, setNome] = useState(user?.nome || '')
   const [loading, setLoading] = useState(false)
 
@@ -17,6 +17,7 @@ export default function Perfil() {
     if (!user) return
     setLoading(true)
     await mockDb.updateUser(user.id, { nome })
+    await refreshUser() // atualiza sidebar imediatamente
     setLoading(false)
     toast.success('Perfil atualizado!')
   }

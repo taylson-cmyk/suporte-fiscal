@@ -26,8 +26,8 @@ export default function Cadastro() {
     if (error) {
       toast.error(error)
     } else {
-      toast.success('Conta criada! Verifique seu e-mail.')
-      navigate('/login')
+      toast.success(`Bem-vindo, ${nome}! Conta criada com sucesso.`)
+      navigate('/dashboard')
     }
   }
 

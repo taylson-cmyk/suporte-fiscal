@@ -15,9 +15,19 @@ function set(key: string, value: unknown) {
   localStorage.setItem(key, JSON.stringify(value))
 }
 
+// Converte File para base64 para persistir no localStorage
+function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(reader.result as string)
+    reader.onerror = reject
+    reader.readAsDataURL(file)
+  })
+}
+
 // ─── Seed demo data ────────────────────────────────────────────────────────────
 
-const SEED_DONE = 'sf_seed_v1'
+const SEED_DONE = 'sf_seed_v2'
 
 function seed() {
   if (localStorage.getItem(SEED_DONE)) return
@@ -30,6 +40,7 @@ function seed() {
     { id: clienteId, nome: 'João Cliente', email: 'cliente@demo.com', perfil: 'cliente', criado_em: '2024-01-02T00:00:00Z' },
   ]
   set('sf_users', users)
+  set('sf_passwords', {})
 
   const now = Date.now()
   const tickets: Ticket[] = [
@@ -44,8 +55,8 @@ function seed() {
       concluido_em: null,
     },
     {
-      id: 't2', numero: 2, titulo: 'Enquadramento tributário para revenda',
-      descricao: 'Preciso saber qual o melhor regime para revenda de eletrônicos.',
+      id: 't2', numero: 2, titulo: 'Enquadramento tributário para revenda de eletrônicos',
+      descricao: 'Preciso saber qual o melhor regime tributário para revenda de eletrônicos.',
       observacoes: null,
       categoria: 'revenda', prioridade: 'normal', status: 'nao_iniciado',
       criado_por: clienteId, responsavel: null,
@@ -62,14 +73,25 @@ function seed() {
       iniciado_em: new Date(now - 3600000 * 47).toISOString(),
       concluido_em: new Date(now - 3600000 * 24).toISOString(),
     },
+    {
+      id: 't4', numero: 4, titulo: 'Nota fiscal de serviço - ISS retido',
+      descricao: 'Há dúvida sobre retenção do ISS para serviços prestados fora do município.',
+      observacoes: null,
+      categoria: 'tributacao', prioridade: 'urgente', status: 'impedido',
+      criado_por: clienteId, responsavel: escritorioId,
+      criado_em: new Date(now - 3600000 * 72).toISOString(),
+      iniciado_em: new Date(now - 3600000 * 70).toISOString(),
+      concluido_em: null,
+    },
   ]
   set('sf_tickets', tickets)
   set('sf_anexos', [] as TicketAnexo[])
   set('sf_comentarios', [
-    { id: 'c1', ticket_id: 't1', usuario_id: escritorioId, mensagem: 'Estamos analisando o seu caso. Em breve retornaremos!', criado_em: new Date(now - 3600000 * 3).toISOString() },
+    { id: 'c1', ticket_id: 't1', usuario_id: escritorioId, mensagem: 'Estamos analisando o seu caso. Em breve retornaremos com as orientações!', criado_em: new Date(now - 3600000 * 3).toISOString() },
     { id: 'c2', ticket_id: 't1', usuario_id: clienteId, mensagem: 'Obrigado! Aguardando o retorno.', criado_em: new Date(now - 3600000 * 2).toISOString() },
+    { id: 'c3', ticket_id: 't4', usuario_id: escritorioId, mensagem: 'Aguardando documentação adicional da prefeitura do município destino.', criado_em: new Date(now - 3600000 * 60).toISOString() },
   ] as TicketComentario[])
-  set('sf_next_ticket_num', 4)
+  set('sf_next_ticket_num', 5)
   localStorage.setItem(SEED_DONE, '1')
 }
 
@@ -98,8 +120,8 @@ export const mockAuth = {
   async signIn(email: string, password: string): Promise<{ error: string | null }> {
     const users = get<User[]>('sf_users', [])
     const passwords = get<Record<string, string>>('sf_passwords', {})
-    const user = users.find(u => u.email === email)
-    if (!user) return { error: 'Usuário não encontrado' }
+    const user = users.find(u => u.email.toLowerCase() === email.toLowerCase())
+    if (!user) return { error: 'E-mail não encontrado' }
     const stored = passwords[user.id]
     if (stored && stored !== password) return { error: 'Senha incorreta' }
     _session = { user: { id: user.id } }
@@ -107,15 +129,15 @@ export const mockAuth = {
     notifyAuth(_session)
     return { error: null }
   },
-  async signUp(email: string, password: string, nome: string, perfil: UserRole): Promise<{ error: string | null }> {
+  async signUp(email: string, password: string, nome: string, perfil: UserRole): Promise<{ error: string | null; userId?: string }> {
     const users = get<User[]>('sf_users', [])
-    if (users.find(u => u.email === email)) return { error: 'E-mail já cadastrado' }
+    if (users.find(u => u.email.toLowerCase() === email.toLowerCase())) return { error: 'E-mail já cadastrado' }
     const id = `user-${Date.now()}`
     const newUser: User = { id, nome, email, perfil, criado_em: new Date().toISOString() }
     set('sf_users', [...users, newUser])
     const passwords = get<Record<string, string>>('sf_passwords', {})
     set('sf_passwords', { ...passwords, [id]: password })
-    return { error: null }
+    return { error: null, userId: id }
   },
   signOut() {
     _session = null
@@ -126,7 +148,7 @@ export const mockAuth = {
 
 // ─── DB helpers ────────────────────────────────────────────────────────────────
 
-function delay(ms = 80): Promise<void> {
+function delay(ms = 60): Promise<void> {
   return new Promise(r => setTimeout(r, ms))
 }
 
@@ -155,7 +177,10 @@ export const mockDb = {
     if (filters.status) tickets = tickets.filter(t => t.status === filters.status)
     if (filters.categoria) tickets = tickets.filter(t => t.categoria === filters.categoria)
     if (filters.prioridade) tickets = tickets.filter(t => t.prioridade === filters.prioridade)
-    if (filters.search) tickets = tickets.filter(t => t.titulo.toLowerCase().includes(filters.search.toLowerCase()))
+    if (filters.search) tickets = tickets.filter(t =>
+      t.titulo.toLowerCase().includes(filters.search.toLowerCase()) ||
+      t.descricao.toLowerCase().includes(filters.search.toLowerCase())
+    )
     return tickets.sort((a, b) => new Date(b.criado_em).getTime() - new Date(a.criado_em).getTime())
   },
   async getTicket(id: string): Promise<Ticket | null> {
@@ -186,20 +211,26 @@ export const mockDb = {
     await delay()
     set('sf_tickets', get<Ticket[]>('sf_tickets', []).map(t => t.id === id ? { ...t, ...updates } : t))
   },
+  async deleteTicket(id: string): Promise<void> {
+    await delay()
+    set('sf_tickets', get<Ticket[]>('sf_tickets', []).filter(t => t.id !== id))
+    set('sf_anexos', get<TicketAnexo[]>('sf_anexos', []).filter(a => a.ticket_id !== id))
+    set('sf_comentarios', get<TicketComentario[]>('sf_comentarios', []).filter(c => c.ticket_id !== id))
+  },
 
-  // Anexos
+  // Anexos — armazena como base64 para persistir entre sessões
   async getAnexos(ticketId: string): Promise<TicketAnexo[]> {
     await delay()
     return get<TicketAnexo[]>('sf_anexos', []).filter(a => a.ticket_id === ticketId)
   },
   async addAnexo(ticketId: string, file: File): Promise<TicketAnexo> {
+    const base64 = await fileToBase64(file)
     await delay()
-    const url = URL.createObjectURL(file)
     const anexo: TicketAnexo = {
-      id: `a-${Date.now()}`,
+      id: `a-${Date.now()}-${Math.random().toString(36).slice(2)}`,
       ticket_id: ticketId,
-      url_arquivo: url,
-      nome_arquivo: file.name,
+      url_arquivo: base64,
+      nome_arquivo: file.name || 'imagem.png',
       enviado_em: new Date().toISOString(),
     }
     set('sf_anexos', [...get<TicketAnexo[]>('sf_anexos', []), anexo])
@@ -209,7 +240,9 @@ export const mockDb = {
   // Comentários
   async getComentarios(ticketId: string): Promise<TicketComentario[]> {
     await delay()
-    return get<TicketComentario[]>('sf_comentarios', []).filter(c => c.ticket_id === ticketId)
+    return get<TicketComentario[]>('sf_comentarios', [])
+      .filter(c => c.ticket_id === ticketId)
+      .sort((a, b) => new Date(a.criado_em).getTime() - new Date(b.criado_em).getTime())
   },
   async addComentario(ticketId: string, usuarioId: string, mensagem: string): Promise<TicketComentario> {
     await delay()
@@ -222,11 +255,6 @@ export const mockDb = {
     }
     set('sf_comentarios', [...get<TicketComentario[]>('sf_comentarios', []), c])
     return c
-  },
-
-  // Realtime (no-op para mock — componentes usam refresh manual)
-  subscribe(_table: string, _cb: () => void) {
-    return { unsubscribe: () => {} }
   },
 }
 
