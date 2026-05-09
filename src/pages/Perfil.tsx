@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react'
 import { useAuth } from '../contexts/AuthContext'
-import { supabase } from '../lib/supabase'
+import { mockDb } from '../lib/mockDb'
 import AppLayout from '../components/layout/AppLayout'
 import toast from 'react-hot-toast'
 import { Building2 } from 'lucide-react'
@@ -16,16 +16,9 @@ export default function Perfil() {
     e.preventDefault()
     if (!user) return
     setLoading(true)
-    const { error } = await supabase
-      .from('usuarios')
-      .update({ nome })
-      .eq('id', user.id)
+    await mockDb.updateUser(user.id, { nome })
     setLoading(false)
-    if (error) {
-      toast.error('Erro ao atualizar perfil')
-    } else {
-      toast.success('Perfil atualizado!')
-    }
+    toast.success('Perfil atualizado!')
   }
 
   if (!user) return null

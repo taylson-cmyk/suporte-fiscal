@@ -1,6 +1,6 @@
 import { useState, type FormEvent, type ChangeEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { supabase } from '../lib/supabase'
+import { mockDb } from '../lib/mockDb'
 import { useAuth } from '../contexts/AuthContext'
 import AppLayout from '../components/layout/AppLayout'
 import toast from 'react-hot-toast'
@@ -42,52 +42,22 @@ export default function NovoTicket() {
     })
   }
 
-  async function uploadAttachment(ticketId: string, att: AttachmentPreview): Promise<string | null> {
-    const ext = att.file.name.split('.').pop()
-    const path = `${ticketId}/${Date.now()}.${ext}`
-    const { error } = await supabase.storage
-      .from('ticket-attachments')
-      .upload(path, att.file)
-    if (error) return null
-    const { data } = supabase.storage.from('ticket-attachments').getPublicUrl(path)
-    return data.publicUrl
-  }
-
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
     if (!user) return
     setLoading(true)
 
-    const { data: ticket, error } = await supabase
-      .from('tickets')
-      .insert({
-        titulo,
-        descricao,
-        observacoes: observacoes || null,
-        categoria,
-        prioridade,
-        status: 'nao_iniciado',
-        criado_por: user.id,
-      })
-      .select()
-      .single()
+    const ticket = await mockDb.createTicket({
+      titulo,
+      descricao,
+      observacoes: observacoes || null,
+      categoria,
+      prioridade,
+      criado_por: user.id,
+    })
 
-    if (error || !ticket) {
-      toast.error('Erro ao criar ticket')
-      setLoading(false)
-      return
-    }
-
-    // Upload attachments
     for (const att of attachments) {
-      const url = await uploadAttachment(ticket.id, att)
-      if (url) {
-        await supabase.from('ticket_anexos').insert({
-          ticket_id: ticket.id,
-          url_arquivo: url,
-          nome_arquivo: att.name,
-        })
-      }
+      await mockDb.addAnexo(ticket.id, att.file)
     }
 
     toast.success(`Ticket #${String(ticket.numero).padStart(4, '0')} criado com sucesso!`)

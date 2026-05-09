@@ -2,7 +2,7 @@ import { useState, type FormEvent } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import { useTicket } from '../hooks/useTickets'
-import { supabase } from '../lib/supabase'
+import { mockDb } from '../lib/mockDb'
 import AppLayout from '../components/layout/AppLayout'
 import StatusBadge from '../components/ui/StatusBadge'
 import PriorityBadge from '../components/ui/PriorityBadge'
@@ -50,49 +50,26 @@ export default function TicketDetalhe() {
       updates.concluido_em = null
     }
 
-    const { error } = await supabase
-      .from('tickets')
-      .update(updates)
-      .eq('id', ticket.id)
-
-    if (error) {
-      toast.error('Erro ao atualizar status')
-    } else {
-      toast.success('Status atualizado!')
-      refresh()
-    }
+    await mockDb.updateTicket(ticket.id, updates)
+    toast.success('Status atualizado!')
+    refresh()
     setUpdatingStatus(false)
   }
 
   async function handleResponsavelChange(responsavelId: string) {
     if (!ticket) return
-    const { error } = await supabase
-      .from('tickets')
-      .update({ responsavel: responsavelId || null })
-      .eq('id', ticket.id)
-    if (error) {
-      toast.error('Erro ao atualizar responsável')
-    } else {
-      toast.success('Responsável atualizado!')
-      refresh()
-    }
+    await mockDb.updateTicket(ticket.id, { responsavel: responsavelId || null })
+    toast.success('Responsável atualizado!')
+    refresh()
   }
 
   async function handleSendComment(e: FormEvent) {
     e.preventDefault()
     if (!comentario.trim() || !user || !ticket) return
     setSendingComment(true)
-    const { error } = await supabase.from('ticket_comentarios').insert({
-      ticket_id: ticket.id,
-      usuario_id: user.id,
-      mensagem: comentario.trim(),
-    })
-    if (error) {
-      toast.error('Erro ao enviar comentário')
-    } else {
-      setComentario('')
-      refresh()
-    }
+    await mockDb.addComentario(ticket.id, user.id, comentario.trim())
+    setComentario('')
+    refresh()
     setSendingComment(false)
   }
 
@@ -393,12 +370,8 @@ function ResponsavelSelector({
   const [open, setOpen] = useState(false)
 
   async function loadUsers() {
-    const { data } = await supabase
-      .from('usuarios')
-      .select('id, nome')
-      .eq('perfil', 'escritorio')
-      .order('nome')
-    if (data) setUsuarios(data)
+    const all = await mockDb.getAllUsers()
+    setUsuarios(all.filter(u => u.perfil === 'escritorio').sort((a, b) => a.nome.localeCompare(b.nome)))
     setOpen(true)
   }
 

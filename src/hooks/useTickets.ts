@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { supabase } from '../lib/supabase'
+import { mockDb } from '../lib/mockDb'
 import type { Ticket, TicketStatus } from '../lib/types'
 import { useAuth } from '../contexts/AuthContext'
 
@@ -10,6 +10,19 @@ interface TicketFilters {
   search?: string
 }
 
+function enrichTickets(tickets: Ticket[], users: Awaited<ReturnType<typeof mockDb.getAllUsers>>, anexosMap: Record<string, any[]>, comentariosMap: Record<string, any[]>): Ticket[] {
+  return tickets.map(t => ({
+    ...t,
+    criador: users.find(u => u.id === t.criado_por),
+    responsavel_user: t.responsavel ? users.find(u => u.id === t.responsavel) : undefined,
+    anexos: anexosMap[t.id] || [],
+    comentarios: (comentariosMap[t.id] || []).map((c: any) => ({
+      ...c,
+      usuario: users.find(u => u.id === c.usuario_id),
+    })),
+  }))
+}
+
 export function useTickets(filters: TicketFilters = {}) {
   const { user } = useAuth()
   const [tickets, setTickets] = useState<Ticket[]>([])
@@ -18,41 +31,34 @@ export function useTickets(filters: TicketFilters = {}) {
   const fetchTickets = useCallback(async () => {
     if (!user) return
     setLoading(true)
+    const [rawTickets, allUsers] = await Promise.all([
+      mockDb.getTickets(user.id, user.perfil, {
+        status: filters.status || '',
+        categoria: filters.categoria || '',
+        prioridade: filters.prioridade || '',
+        search: filters.search || '',
+      }),
+      mockDb.getAllUsers(),
+    ])
 
-    let query = supabase
-      .from('tickets')
-      .select(`
-        *,
-        criador:criado_por(id, nome, email, perfil),
-        responsavel_user:responsavel(id, nome, email, perfil),
-        anexos:ticket_anexos(*),
-        comentarios:ticket_comentarios(*, usuario:usuario_id(id, nome, email, perfil))
-      `)
-      .order('criado_em', { ascending: false })
+    const anexosMap: Record<string, any[]> = {}
+    const comentariosMap: Record<string, any[]> = {}
+    await Promise.all(
+      rawTickets.map(async t => {
+        const [anexos, comentarios] = await Promise.all([
+          mockDb.getAnexos(t.id),
+          mockDb.getComentarios(t.id),
+        ])
+        anexosMap[t.id] = anexos
+        comentariosMap[t.id] = comentarios
+      })
+    )
 
-    if (user.perfil === 'cliente') {
-      query = query.eq('criado_por', user.id)
-    }
-    if (filters.status) query = query.eq('status', filters.status)
-    if (filters.categoria) query = query.eq('categoria', filters.categoria)
-    if (filters.prioridade) query = query.eq('prioridade', filters.prioridade)
-    if (filters.search) query = query.ilike('titulo', `%${filters.search}%`)
-
-    const { data, error } = await query
-    if (!error && data) setTickets(data as unknown as Ticket[])
+    setTickets(enrichTickets(rawTickets, allUsers, anexosMap, comentariosMap))
     setLoading(false)
   }, [user, filters.status, filters.categoria, filters.prioridade, filters.search])
 
-  useEffect(() => {
-    fetchTickets()
-
-    const channel = supabase
-      .channel('tickets-changes')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'tickets' }, fetchTickets)
-      .subscribe()
-
-    return () => { supabase.removeChannel(channel) }
-  }, [fetchTickets])
+  useEffect(() => { fetchTickets() }, [fetchTickets])
 
   return { tickets, loading, refresh: fetchTickets }
 }
@@ -62,33 +68,30 @@ export function useTicket(id: string) {
   const [loading, setLoading] = useState(true)
 
   const fetchTicket = useCallback(async () => {
-    const { data, error } = await supabase
-      .from('tickets')
-      .select(`
-        *,
-        criador:criado_por(id, nome, email, perfil),
-        responsavel_user:responsavel(id, nome, email, perfil),
-        anexos:ticket_anexos(*),
-        comentarios:ticket_comentarios(*, usuario:usuario_id(id, nome, email, perfil))
-      `)
-      .eq('id', id)
-      .single()
+    const [rawTicket, allUsers] = await Promise.all([
+      mockDb.getTicket(id),
+      mockDb.getAllUsers(),
+    ])
+    if (!rawTicket) { setLoading(false); return }
 
-    if (!error && data) setTicket(data as unknown as Ticket)
+    const [anexos, comentarios] = await Promise.all([
+      mockDb.getAnexos(id),
+      mockDb.getComentarios(id),
+    ])
+
+    const enriched = {
+      ...rawTicket,
+      criador: allUsers.find(u => u.id === rawTicket.criado_por),
+      responsavel_user: rawTicket.responsavel ? allUsers.find(u => u.id === rawTicket.responsavel) : undefined,
+      anexos,
+      comentarios: comentarios.map(c => ({ ...c, usuario: allUsers.find(u => u.id === c.usuario_id) })),
+    }
+
+    setTicket(enriched as Ticket)
     setLoading(false)
   }, [id])
 
-  useEffect(() => {
-    fetchTicket()
-
-    const channel = supabase
-      .channel(`ticket-${id}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'tickets', filter: `id=eq.${id}` }, fetchTicket)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'ticket_comentarios', filter: `ticket_id=eq.${id}` }, fetchTicket)
-      .subscribe()
-
-    return () => { supabase.removeChannel(channel) }
-  }, [id, fetchTicket])
+  useEffect(() => { fetchTicket() }, [fetchTicket])
 
   return { ticket, loading, refresh: fetchTicket }
 }

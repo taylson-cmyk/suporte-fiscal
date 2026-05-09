@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { supabase } from '../lib/supabase'
+import { mockDb } from '../lib/mockDb'
 import AppLayout from '../components/layout/AppLayout'
 import type { User } from '../lib/types'
 import { format } from 'date-fns'
@@ -13,11 +13,8 @@ export default function Configuracoes() {
   const [search, setSearch] = useState('')
 
   async function fetchUsuarios() {
-    const { data } = await supabase
-      .from('usuarios')
-      .select('*')
-      .order('criado_em', { ascending: false })
-    if (data) setUsuarios(data as User[])
+    const data = await mockDb.getAllUsers()
+    setUsuarios(data.sort((a, b) => new Date(b.criado_em).getTime() - new Date(a.criado_em).getTime()))
     setLoading(false)
   }
 
@@ -28,18 +25,11 @@ export default function Configuracoes() {
     u.email.toLowerCase().includes(search.toLowerCase())
   )
 
-  async function togglePerfil(user: User) {
-    const novo = user.perfil === 'escritorio' ? 'cliente' : 'escritorio'
-    const { error } = await supabase
-      .from('usuarios')
-      .update({ perfil: novo })
-      .eq('id', user.id)
-    if (error) {
-      toast.error('Erro ao alterar perfil')
-    } else {
-      toast.success(`Perfil alterado para ${novo === 'escritorio' ? 'Escritório' : 'Cliente'}`)
-      fetchUsuarios()
-    }
+  async function togglePerfil(u: User) {
+    const novo = u.perfil === 'escritorio' ? 'cliente' : 'escritorio'
+    await mockDb.updateUser(u.id, { perfil: novo })
+    toast.success(`Perfil alterado para ${novo === 'escritorio' ? 'Escritório' : 'Cliente'}`)
+    fetchUsuarios()
   }
 
   return (
